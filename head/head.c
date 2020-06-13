@@ -18,12 +18,10 @@ static void
 do_head(FILE *f, long nlines)
 {
     int c;
-
     if (nlines <= 0)
         return;
-    while ((c = getc(f) != EOF))
+    while ((c = getc(f)) != EOF)
     {
-
         if (putchar(c) < 0)
             exit(1);
         if (c == '\n')
