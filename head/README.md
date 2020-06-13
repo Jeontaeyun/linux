@@ -40,4 +40,11 @@ extern char *optarg;
 extern int optind, opterr, optopt;
 ```
 
-`getopt_long()` API can parse `-` and even `--` optioon
+`getopt_long()` API can parse `-` and even `--` option.
+
+| member name | type   | description                                                |
+| ----------- | ------ | ---------------------------------------------------------- |
+| name        | char\* | Long option name.                                          |
+| has_arg     | int    | no_argument(0), required_argument(1), optional_argument(2) |
+| flags       | int\*  |
+| val         | int    |                                                            |
