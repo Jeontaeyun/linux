@@ -26,10 +26,12 @@ struct HTTPHeaderField
     struct HTTPHeaderField *next;
 };
 
+// HTTPHeaderField is linked listtt
 struct HTTPRequest
 {
     int protocol_minor_version;
     char *method;
+    char *path;
     struct HTTPHeaderField *header;
     char *body;
     long length;
@@ -51,6 +53,8 @@ static void install_signal_handlers(void);
 static void trap_signal(int sig, sighandler_t handler);
 static void signal_exit(int sig);
 static void validate_directory(char *path);
+static void service(FILE *in, FILE *out, char *docroot);
+static void free_request(struct HTTPRequest *req);
 
 int main(int argc, char *argv[])
 {
@@ -60,6 +64,8 @@ int main(int argc, char *argv[])
         exit(1);
     }
     validate_directory(argv[1]);
+    install_signal_handlers();
+    service(stdin, stdout, argv[1]);
     exit(0);
 }
 
@@ -117,12 +123,42 @@ static void signal_exit(int sig)
 
 static void validate_directory(char *path)
 {
-    struct stat *buf;
-    if (stat(path, buf) < -1)
-    {
+    struct stat buf;
+
+    if (stat(path, &buf) < -1)
+        log_exit("path is not available");
+    if (!S_ISDIR(buf.st_mode))
         log_exit("path is not directory");
-    }
-    if (S_ISDIR(buf->st_mode))
-        printf("DIRECTORY");
+
     exit(0);
+}
+
+// Service is main logic for HTTP
+static void service(FILE *in, FILE *out, char *docroot)
+{
+    struct HTTPRequest *req;
+
+    req = read_request(in);
+    respond_to(req, out, docroot);
+    free_request(req);
+}
+
+// request memory release function
+static void free_request(struct HTTPRequest *req)
+{
+    struct HTTPHeaderField *h, *head;
+
+    head = req->header;
+    while (head)
+    {
+        h = head;
+        head = head->next;
+        free(h->name);
+        free(h->value);
+        free(h);
+    }
+    free(req->method);
+    free(req->path);
+    free(req->body);
+    free(req);
 }
