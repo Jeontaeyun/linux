@@ -81,6 +81,7 @@ int main(int argc, char *argv[])
     }
     validate_directory(argv[1]);
     install_signal_handlers();
+
     service(stdin, stdout, argv[1]);
     exit(0);
 }
@@ -145,8 +146,6 @@ static void validate_directory(char *path)
         log_exit("path is not available");
     if (!S_ISDIR(buf.st_mode))
         log_exit("path is not directory");
-
-    exit(0);
 }
 
 // Service is main logic for HTTP
@@ -212,7 +211,6 @@ static void read_request_line(struct HTTPRequest *req, FILE *in)
 {
     char buf[LINE_BUF_SIZE];
     char *path, *p;
-
     // Data from network is can't be reliable, so we need to make length limit
     if (!fgets(buf, LINE_BUF_SIZE, in))
         log_exit("no request line");
