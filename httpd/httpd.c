@@ -520,9 +520,11 @@ server_main(int server_fd, char *docroot)
         sock = accept(server_fd, (struct sockaddr *)&addr, &addrlen);
         if (sock < 0)
             log_exit("accept(2) failed: %s", strerror(errno));
+        // Fork child proccess
         pid = fork();
         if (pid < 0)
             exit(3);
+        // Child Process
         if (pid == 0)
         {
             FILE *inf = fdopen(sock, "r");
