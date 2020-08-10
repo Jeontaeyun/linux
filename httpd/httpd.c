@@ -10,6 +10,9 @@
 #include <ctype.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netdb.h>
 
 #define _FILE_OFFSET_BITS 64
 #define SERVER_NAME "CONNECT_HTTP"
@@ -71,6 +74,8 @@ static char *guess_content_type(struct FileInfo *info);
 static void method_not_allowed(struct HTTPRequest *req, FILE *out);
 static void not_implemented(struct HTTPRequest *req, FILE *out);
 static void not_found(struct HTTPRequest *req, FILE *out);
+static int listen_socket(char *port);
+static void server_main(int server_fd, char *docroot);
 
 int main(int argc, char *argv[])
 {
@@ -463,5 +468,68 @@ upcase(char *str)
     for (p = str; *p; p++)
     {
         *p = (char)toupper((int)*p);
+    }
+}
+
+#define MAX_BACKLOG 5
+#define DEFAULT_PORT "80"
+
+static int
+listen_socket(char *port)
+{
+    struct addrinfo hints, *res, *ai;
+    int err;
+
+    memset(&hints, 0, sizeof(struct addrinfo));
+    // Declare this socket to IPv4
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    // Declare this socket to usage of server
+    hints.ai_flags = AI_PASSIVE;
+    if ((err = getaddrinfo(NULL, port, &hints, &res)) != 0)
+        log_exit(gai_strerror(err));
+    for (ai = res; ai; ai->ai_next)
+    {
+        int sock;
+
+        sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (sock < 0)
+            continue;
+        if (bind(sock, ai->ai_addr, ai->ai_addrlen) < 0)
+        {
+            close(sock);
+            continue;
+        }
+        freeaddrinfo(res);
+        return sock;
+    }
+    log_exit("failed to listen socket");
+    return -1;
+}
+
+static void
+server_main(int server_fd, char *docroot)
+{
+    for (;;)
+    {
+        struct sockaddr_storage addr;
+        socklen_t addrlen = sizeof addr;
+        int sock;
+        int pid;
+
+        sock = accept(server_fd, (struct sockaddr *)&addr, &addrlen);
+        if (sock < 0)
+            log_exit("accept(2) failed: %s", strerror(errno));
+        pid = fork();
+        if (pid < 0)
+            exit(3);
+        if (pid == 0)
+        {
+            FILE *inf = fdopen(sock, "r");
+            FILE *outf = fdopen(sock, "w");
+
+            service(inf, outf, docroot);
+        }
+        close(sock);
     }
 }
