@@ -8,11 +8,14 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
-#include <signal.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <stdarg.h>
 #include <netdb.h>
+#include <syslog.h>
+#include <pwd.h>
+#include <grp.h>
 
 #define _FILE_OFFSET_BITS 64
 #define SERVER_NAME "CONNECT_HTTP"
@@ -76,10 +79,24 @@ static void not_implemented(struct HTTPRequest *req, FILE *out);
 static void not_found(struct HTTPRequest *req, FILE *out);
 static int listen_socket(char *port);
 static void server_main(int server_fd, char *docroot);
+static void detach_children(void);
+static void noop_handler(int sig);
+
 static void became_daemon(void);
+static void setup_environment(char *root, char *user, char *group);
+
+static int debug_mode = 0;
 
 int main(int argc, char *argv[])
 {
+    int server_fd;
+    char *port = NULL;
+    char *docroot;
+    int do_chroot = 0;
+    char *user = NULL;
+    char *group = NULL;
+    int opt;
+
     if (argc != 2)
     {
         fprintf(stderr, "USAGE: %s <docroot>\n", argv[0]);
@@ -88,7 +105,14 @@ int main(int argc, char *argv[])
     validate_directory(argv[1]);
     install_signal_handlers();
 
-    service(stdin, stdout, argv[1]);
+    server_fd = listen_socket(port);
+    if (!debug_mode)
+    {
+        openlog(SERVER_NAME, LOG_PID | LOG_NDELAY, LOG_DAEMON);
+        become_daemon();
+        logging("start service");
+    }
+    server_main(server_fd, docroot);
     exit(0);
 }
 
@@ -96,18 +120,18 @@ int main(int argc, char *argv[])
 static void
 log_exit(char *fmt, ...)
 {
-    /**
-    * Usage of variable arguments
-    * vs_list ap;
-    * vs_start(ap, fmt)
-    * /-- use ap --/
-    * vs_end(ap)
-    **/
     va_list ap;
 
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
+    if (debug_mode)
+    {
+        vfprintf(stderr, fmt, ap);
+        fputc('\n', stderr);
+    }
+    else
+    {
+        vsyslog(LOG_ERR, fmt, ap);
+    }
     va_end(ap);
     exit(1);
 }
@@ -488,7 +512,7 @@ listen_socket(char *port)
     // Declare this socket to usage of server
     hints.ai_flags = AI_PASSIVE;
     if ((err = getaddrinfo(NULL, port, &hints, &res)) != 0)
-        log_exit(gai_strerror(err));
+        log_exit((char *)gai_strerror(err));
     for (ai = res; ai; ai->ai_next)
     {
         int sock;
@@ -532,6 +556,7 @@ server_main(int server_fd, char *docroot)
             FILE *outf = fdopen(sock, "w");
 
             service(inf, outf, docroot);
+            exit(0);
         }
         close(sock);
     }
@@ -567,4 +592,62 @@ static void become_daemon()
          * 제어단말(Terminal)을 가지지 않는다.
          **/
         log_exit("setsid(2) failed: %s", strerror(errno));
+}
+
+static void setup_environment(char *root, char *user, char *group)
+{
+    struct passwd *pw;
+    struct group *gr;
+
+    if (!user || !group)
+    {
+        fprintf(stderr, "use both of --user and --group\n");
+        exit(1);
+    }
+    gr = getgrnam(group);
+    if (!gr)
+    {
+        fprintf(stderr, "no such group: %s\n", group);
+        exit(1);
+    }
+    if (setgid(gr->gr_gid) < 0)
+    {
+        perror("setgid(2)");
+        exit(1);
+    }
+    if (initgroups(user, gr->gr_gid) < 0)
+    {
+        perror("initgroups(2)");
+        exit(1);
+    }
+    pw = getpwnam(user);
+    if (!pw)
+    {
+        fprintf(stderr, "no such user: %s\n", user);
+        exit(1);
+    }
+    chroot(root);
+    if (setuid(pw->pw_uid) < 0)
+    {
+        perror("setuid(2)");
+        exit(1);
+    }
+}
+
+static void
+detach_children(void)
+{
+    struct sigaction act;
+
+    act.sa_handler = noop_handler;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = SA_RESTART | SA_NOCLDWAIT;
+    if (sigaction(SIGCHLD, &act, NULL) < 0)
+        log_exit("sigaction() failed: %s", strerror(errno));
+}
+
+static void
+noop_handler(int sig)
+{
+    ;
 }
