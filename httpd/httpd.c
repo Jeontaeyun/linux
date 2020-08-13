@@ -76,6 +76,7 @@ static void not_implemented(struct HTTPRequest *req, FILE *out);
 static void not_found(struct HTTPRequest *req, FILE *out);
 static int listen_socket(char *port);
 static void server_main(int server_fd, char *docroot);
+static void became_daemon(void);
 
 int main(int argc, char *argv[])
 {
@@ -534,4 +535,36 @@ server_main(int server_fd, char *docroot)
         }
         close(sock);
     }
+}
+
+static void become_daemon()
+{
+    int n;
+
+    /**
+     *  01. 작업 디렉토리를 root로 변경해 파일 시스템이 마운트 해제할 수 없도록 함.
+     *     프로세스가 Current Directory로 사용하고 있는 파일 시스템은 마운트 해제할 수 없으므로 
+     *     장기간 실행되는 데몬은 가급적 루트 디렉토리로 이동해야 함
+     **/
+    if (chdir("/") < 0)
+        log_exit("chdir(2) failed: %s", strerror(errno));
+    /**
+     * 02. 표준 입출력 방지
+     **/
+    freopen("/dev/null", "r", stdin);
+    freopen("/dev/null", "w", stdout);
+    freopen("/dev/null", "w", stderr);
+    /**
+     * 03. 실제로 데몬이 되는 과정
+     **/
+    n = fork();
+    if (n < 0)
+        log_exit("fork(2): failed: %s", strerror(errno));
+    if (n != 0)
+        _exit(0); /* 부모 프로세스를 종료시킴 */
+    if (setsid() < 0)
+        /* setsid()를 통해 자식 프로세스를 프로세스 새로운 세션을 만듬
+         * 제어단말(Terminal)을 가지지 않는다.
+         **/
+        log_exit("setsid(2) failed: %s", strerror(errno));
 }
