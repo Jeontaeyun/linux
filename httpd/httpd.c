@@ -2,28 +2,45 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <netdb.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 #include <stdarg.h>
 #include <ctype.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <stdarg.h>
-#include <netdb.h>
-#include <syslog.h>
+#include <signal.h>
 #include <pwd.h>
 #include <grp.h>
+#include <syslog.h>
+#include <getopt.h>
 
+#define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #define SERVER_NAME "CONNECT_HTTP"
 #define SERVER_VERSION "1.0"
 #define HTTP_MINOR_VERSION 0
 #define BLOCK_BUF_SIZE 1024
 #define LINE_BUF_SIZE 4096
+#define DEFAULT_PORT "80"
+#define MAX_BACKLOG 5
 #define MAX_REQUEST_BODY_LENGTH (1024 * 1024)
+#define USAGE "Usage: %s [--port=n] [--chroot --user=u --group=g] <docroot>\n"
+
+static int debug_mode = 0;
+
+static struct option longopts[] = {
+    {"debug", no_argument, &debug_mode, 1},
+    {"chroot", no_argument, NULL, 'c'},
+    {"user", required_argument, NULL, 'u'},
+    {"group", required_argument, NULL, 'g'},
+    {"port", required_argument, NULL, 'p'},
+    {"help", no_argument, NULL, 'h'},
+    {0, 0, 0, 0}};
 
 struct HTTPHeaderField
 {
@@ -82,10 +99,8 @@ static void server_main(int server_fd, char *docroot);
 static void detach_children(void);
 static void noop_handler(int sig);
 
-static void became_daemon(void);
+static void become_daemon(void);
 static void setup_environment(char *root, char *user, char *group);
-
-static int debug_mode = 0;
 
 int main(int argc, char *argv[])
 {
@@ -97,20 +112,49 @@ int main(int argc, char *argv[])
     char *group = NULL;
     int opt;
 
-    if (argc != 2)
+    while ((opt = getopt_long(argc, argv, "", longopts, NULL)) != -1)
     {
-        fprintf(stderr, "USAGE: %s <docroot>\n", argv[0]);
+        switch (opt)
+        {
+        case 0:
+            break;
+        case 'c':
+            do_chroot = 1;
+            break;
+        case 'u':
+            user = optarg;
+            break;
+        case 'g':
+            group = optarg;
+            break;
+        case 'p':
+            port = optarg;
+            break;
+        case 'h':
+            fprintf(stderr, USAGE, argv[0]);
+            exit(0);
+        case '?':
+            fprintf(stderr, USAGE, argv[0]);
+            exit(1);
+        }
+    }
+    if (optind != argc - 1)
+    {
+        fprintf(stderr, USAGE, argv[0]);
         exit(1);
     }
-    validate_directory(argv[1]);
+    docroot = argv[optind];
+    if (do_chroot)
+    {
+        setup_environment(docroot, user, group);
+        docroot = "";
+    }
     install_signal_handlers();
-
     server_fd = listen_socket(port);
     if (!debug_mode)
     {
         openlog(SERVER_NAME, LOG_PID | LOG_NDELAY, LOG_DAEMON);
         become_daemon();
-        logging("start service");
     }
     server_main(server_fd, docroot);
     exit(0);
@@ -496,9 +540,6 @@ upcase(char *str)
     }
 }
 
-#define MAX_BACKLOG 5
-#define DEFAULT_PORT "80"
-
 static int
 listen_socket(char *port)
 {
@@ -513,7 +554,7 @@ listen_socket(char *port)
     hints.ai_flags = AI_PASSIVE;
     if ((err = getaddrinfo(NULL, port, &hints, &res)) != 0)
         log_exit((char *)gai_strerror(err));
-    for (ai = res; ai; ai->ai_next)
+    for (ai = res; ai; ai = ai->ai_next)
     {
         int sock;
 

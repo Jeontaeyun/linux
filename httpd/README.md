@@ -16,4 +16,4 @@ Socket structure is `Network - Network Driver - TCP/IP - Socket - Application`
 
 ## Reference
 
-1.  (wiki)[https://ko.wikipedia.org/wiki/%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC_%EC%86%8C%EC%BC%93]
+1.  [wiki](https://ko.wikipedia.org/wiki/%EB%84%A4%ED%8A%B8%EC%9B%8C%ED%81%AC_%EC%86%8C%EC%BC%93)
